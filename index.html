@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>靜宜大學教育學程學分控制與排課系統 - 115-2 最終校正版</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html2canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* 拖曳目標區與高亮 */
+        .dropzone { transition: background-color 0.2s ease, box-shadow 0.2s; }
+        .drag-over {
+            background-color: #dbeafe !important;
+            box-shadow: inset 0 0 0 2px #3b82f6 !important;
+        }
+        .drag-error {
+            background-color: #fee2e2 !important;
+            box-shadow: inset 0 0 0 2px #ef4444 !important;
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
+        /* 課程卡片 */
+        .course-card { 
+            transition: all 0.2s ease; 
+            cursor: pointer; 
+        }
+        .course-card:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            z-index: 10;
+        }
+        .course-card:active { 
+            transform: scale(0.97); 
+            filter: brightness(0.95); 
+        }
+        .course-card * { pointer-events: none; }
+        
+        /* --- 核心修復：空白課表網格加固，徹底移除 Flex 防止表格崩潰 --- */
+        .schedule-cell {
+            height: 65px;
+            position: relative;
+            padding: 4px !important;
+            border: 1px solid #cbd5e1 !important; 
+            background-color: #ffffff;
+            vertical-align: top; 
+        }
+        
+        /* 排入課表內的卡片 */
+        .schedule-cell .course-card {
+            width: 100%;
+            min-height: 55px; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            margin: 0 0 4px 0; 
+            border-radius: 4px; 
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            border-width: 2px !important;
+        }
+        .schedule-cell .course-card:last-child {
+            margin-bottom: 0;
+        }
+
+        .check-pass { color: #16a34a; font-weight: bold; }
+        .check-fail { color: #ef4444; }
+        
+        .hide-course { display: none !important; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-gray-800 pb-10">
+
+    <div class="max-w-[1450px] mx-auto p-4 space-y-4">
+        
+        <!-- 標題區 -->
+        <header class="bg-white rounded-xl shadow-sm p-5 border-l-8 border-blue-700 flex justify-between items-center relative z-10 flex-wrap gap-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-gray-800 tracking-tight">靜宜大學師培中心 / 教研所</h1>
+                <p class="text-gray-500 mt-1 font-medium flex items-center gap-2">
+                    115學年度第2學期 最新校正版排課系統 | 點擊排課 | 缺課精算
+                    <span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded border border-green-200">✅ 自動存檔</span>
+                </p>
+            </div>
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="text-right bg-slate-100 px-4 py-2 rounded-lg border border-slate-200">
+                    <p class="text-xs text-gray-500 font-bold">本學期教程已排學分</p>
+                    <p class="text-xl font-bold text-gray-800"><span id="current-sem-credits">0</span> / 15</p>
+                </div>
+                <button onclick="exportSchedule()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded shadow font-bold transition flex items-center gap-2">
+                    📸 匯出課表
+                </button>
+                <button onclick="resetSystem()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-3 rounded shadow font-bold transition">
+                    重置清空
+                </button>
+            </div>
+        </header>
+
+        <!-- 儀表板區 -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-4 relative z-10">
+            
+            <!-- 按鈕區 -->
+            <div class="lg:col-span-3 flex flex-col gap-4">
+                <div onclick="openModal('compulsory')" class="flex-1 cursor-pointer bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 p-4 rounded-xl shadow-sm flex flex-col justify-center text-center transition transform hover:-translate-y-1">
+                    <h3 class="text-blue-800 font-semibold text-sm flex items-center justify-center gap-2">✅ 歷年已修【必修】</h3>
+                    <p class="text-3xl font-bold text-blue-600 mt-1"><span id="dash-acq-comp">0</span> <span class="text-sm font-normal text-blue-500">/ 34</span></p>
+                </div>
+                <div onclick="openModal('elective')" class="flex-1 cursor-pointer bg-orange-50 hover:bg-orange-100 border-2 border-orange-200 p-4 rounded-xl shadow-sm flex flex-col justify-center text-center transition transform hover:-translate-y-1">
+                    <h3 class="text-orange-800 font-semibold text-sm flex items-center justify-center gap-2">✅ 歷年已修【選修】</h3>
+                    <p class="text-3xl font-bold text-orange-600 mt-1"><span id="dash-acq-elec">0</span> <span class="text-sm font-normal text-orange-500">/ 12</span></p>
+                </div>
+            </div>
+            
+            <!-- 動態畢業門檻檢核區 -->
+            <div class="lg:col-span-5 bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex flex-col justify-center">
+                <h3 class="text-slate-800 font-bold mb-2 border-b pb-1">📋 領域畢業門檻檢核 (已修 + 本學期排課)</h3>
+                <div class="grid grid-cols-1 gap-y-1.5 text-sm font-medium">
+                    <div id="check-rule-1" class="check-fail">❌ 1. 基本學科：至少 10 學分 (含藝術/音樂)</div>
+                    <div id="check-rule-2" class="check-fail">❌ 2. 教育基礎：至少 2 科，共 4 學分</div>
+                    <div id="check-rule-3" class="check-fail">❌ 3. 教育方法：至少 4 科，共 8 學分</div>
+                    <div id="check-rule-4" class="check-fail">❌ 4. 教育實踐：至少 6 科，共 12 學分</div>
+                    <div id="check-rule-5" class="check-fail">❌ 5. 總選修達 12 學分 (需含特教、議題) 且總分達 46</div>
+                </div>
+            </div>
+
+            <!-- 尚缺學分與必修清單區 -->
+            <div class="lg:col-span-4 bg-red-50 border border-red-200 p-4 rounded-xl shadow-sm flex flex-col">
+                <h3 class="text-red-800 font-bold mb-2 border-b border-red-200 pb-1">🚨 尚缺學分與必修清單</h3>
+                <div class="flex gap-4 mb-2">
+                    <div class="text-red-700 text-sm font-medium">尚缺必修：<span id="missing-comp-credits" class="font-bold text-xl">0</span> 學分</div>
+                    <div class="text-red-700 text-sm font-medium">尚缺選修：<span id="missing-elec-credits" class="font-bold text-xl">0</span> 學分</div>
+                </div>
+                <div class="text-red-700 text-sm font-bold mb-1">未修必修科目：</div>
+                <div id="missing-comp-list" class="text-xs text-red-600 bg-white p-2 rounded border border-red-100 flex-grow overflow-y-auto font-medium flex flex-wrap gap-1 content-start">
+                    <!-- JS 動態產生缺課名單 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- 主排課工作區 -->
+        <div class="flex flex-col lg:flex-row gap-6 items-start">
+            
+            <!-- 左側：排課表 -->
+            <div id="export-area" class="w-full lg:w-3/4 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden relative z-10">
+                <div class="bg-slate-800 text-white p-3 text-center font-bold">
+                    📅 115-2 學期個人專屬課表
+                </div>
+                <table class="w-full table-fixed border-collapse bg-white">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 text-sm border-b-2 border-slate-300">
+                            <th class="border border-slate-300 p-2 w-24">節次 / 時間</th>
+                            <th class="border border-slate-300 p-2">星期一</th>
+                            <th class="border border-slate-300 p-2">星期二</th>
+                            <th class="border border-slate-300 p-2">星期三</th>
+                            <th class="border border-slate-300 p-2">星期四</th>
+                            <th class="border border-slate-300 p-2">星期五</th>
+                        </tr>
+                    </thead>
+                    <tbody id="schedule-body">
+                        <!-- JS 動態產生 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 右側：待排課程 -->
+            <div class="w-full lg:w-1/4 flex flex-col gap-4 sticky top-4 z-10" data-html2canvas-ignore>
+                
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col" style="height: 52vh; min-height: 420px;">
+                    <div class="bg-slate-800 text-white p-3 text-center font-bold">
+                        📋 115-2 開放選課清單
+                    </div>
+                    
+                    <!-- 篩選器 -->
+                    <div class="p-3 bg-gray-50 border-b flex flex-wrap gap-2 items-center justify-center">
+                        <button id="btn-all" onclick="filterCourses('all')" class="filter-btn ring-2 ring-offset-1 ring-blue-500 px-3 py-1.5 bg-white text-gray-700 rounded text-xs font-bold shadow-sm transition">全部</button>
+                        <button id="btn-compulsory" onclick="filterCourses('compulsory')" class="filter-btn px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-xs font-bold shadow-sm hover:bg-blue-200 transition">必修</button>
+                        <button id="btn-elective" onclick="filterCourses('elective')" class="filter-btn px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold shadow-sm hover:bg-green-200 transition">選修</button>
+                        <button id="btn-mandatory-elec" onclick="filterCourses('mandatory-elec')" class="filter-btn px-3 py-1.5 bg-orange-100 text-orange-700 rounded text-xs font-bold shadow-sm hover:bg-orange-200 transition">必選</button>
+                    </div>
+                    
+                    <div class="p-2 text-[0.7rem] text-blue-700 bg-blue-50 border-b font-medium text-center leading-relaxed">
+                        💡 點擊下方卡片即可排入課表；同名課程排入其一後，另一選項會自動隱藏。
+                    </div>
+                    
+                    <div class="overflow-y-auto p-4 space-y-3 flex-grow dropzone bg-slate-50" id="pending">
+                        <!-- JS 動態生成待排卡片 -->
+                    </div>
+                </div>
+
+                <!-- 新增自訂/碩士課程 -->
+                <div class="bg-white rounded-xl shadow-sm border border-purple-200 flex flex-col overflow-hidden">
+                    <div class="bg-purple-700 text-white p-3 text-center font-bold">
+                        ➕ 新增自訂 / 碩士課程
+                    </div>
+                    <div class="p-4 bg-purple-50 flex flex-col gap-3">
+                        <select id="custom-course-category" class="w-full border border-purple-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white font-bold text-gray-700">
+                            <option value="master">🟣 碩士課程 (不計入教程門檻)</option>
+                            <option value="compulsory">🔵 教程必修 (自訂)</option>
+                            <option value="elective">🟠 教程選修 (自訂)</option>
+                        </select>
+                        <input type="text" id="custom-course-name" placeholder="課程名稱 (如: 質性研究)" class="w-full border border-purple-300 rounded p-2 text-sm">
+                        
+                        <div class="grid grid-cols-2 gap-2 mt-1">
+                            <select id="custom-course-day" class="border border-purple-300 rounded p-2 text-sm bg-white text-gray-700">
+                                <option value="mon">星期一</option>
+                                <option value="tue">星期二</option>
+                                <option value="wed">星期三</option>
+                                <option value="thu">星期四</option>
+                                <option value="fri">星期五</option>
+                            </select>
+                            <select id="custom-course-period" class="border border-purple-300 rounded p-2 text-sm bg-white text-gray-700">
+                                <option value="1">第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option>
+                                <option value="4">第 4 節</option><option value="5">第 5 節</option><option value="6">第 6 節</option>
+                                <option value="7">第 7 節</option><option value="8">第 8 節</option><option value="9">第 9 節</option>
+                                <option value="10">第 10 節</option><option value="11">第 11 節</option><option value="12">第 12 節</option>
+                                <option value="13">第 13 節</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="custom-course-credits" placeholder="連堂節數" min="1" max="10" class="w-full border border-purple-300 rounded p-2 text-sm">
+                            <button onclick="addCustomCourse()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-bold shadow">建立並排入</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal：必修已修 -->
+    <div id="modal-compulsory" class="fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50" style="display: none;" data-html2canvas-ignore>
+        <div class="bg-white w-full max-w-2xl rounded-xl shadow-2xl p-6 m-4 max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-xl font-bold text-blue-800">✅ 標記已取得之【必修】學分</h2>
+                <button onclick="closeModal('compulsory')" class="text-gray-500 hover:text-red-500 font-bold text-2xl">&times;</button>
+            </div>
+            <div class="text-xs text-gray-500 mb-2">勾選後，該課程將計入畢業門檻。</div>
+            <div class="overflow-y-auto flex-grow pr-2 space-y-2" id="modal-list-compulsory"></div>
+            <div class="mt-4 pt-4 border-t text-right">
+                <button onclick="closeModal('compulsory')" class="bg-blue-600 text-white px-8 py-2 rounded shadow hover:bg-blue-700 font-bold">完成確認</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal：選修已修 -->
+    <div id="modal-elective" class="fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50" style="display: none;" data-html2canvas-ignore>
+        <div class="bg-white w-full max-w-2xl rounded-xl shadow-2xl p-6 m-4 max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-xl font-bold text-orange-800">✅ 標記已取得之【選修】學分</h2>
+                <button onclick="closeModal('elective')" class="text-gray-500 hover:text-red-500 font-bold text-2xl">&times;</button>
+            </div>
+            <div class="text-xs text-gray-500 mb-2">勾選後，該課程將計入畢業門檻。</div>
+            <div class="overflow-y-auto flex-grow pr-2 space-y-2" id="modal-list-elective"></div>
+            <div class="mt-4 pt-4 border-t text-right">
+                <button onclick="closeModal('elective')" class="bg-orange-600 text-white px-8 py-2 rounded shadow hover:bg-orange-700 font-bold">完成確認</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心資料庫 ---
+        const REQ_COMP_CREDITS = 34;
+        const REQ_ELEC_CREDITS = 12;
+        const MAX_EDU_CREDITS_PER_SEM = 15;
+
+        const domainLabels = {
+            'basic_subj': '基本學科', 'basic_edu': '教育基礎',
+            'methodology': '教育方法', 'practical': '教育實踐', 
+            'custom_master': '碩士', 'custom_comp': '自訂必修', 'custom_elec': '自訂選修'
+        };
+
+        const defaultCoursesData = [
+            // --- 115-2 學期真實開課清單 (根據最新 115-2靜宜課表.docx 更新) ---
+            
+            // 週一
+            { id: 'c11', name: '學習評量', credits: 2, type: 'compulsory', domain: 'methodology', scheduleInfo: { day: 'mon', startP: 3 } },
+            { id: 'c14_A', baseId: 'c14', baseName: '數學科教材教法', name: '數學科教材教法(週一)', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'mon', startP: 3 } },
+            { id: 'c5', name: '教育思潮與教育實際', credits: 2, type: 'compulsory', domain: 'basic_edu', scheduleInfo: { day: 'mon', startP: 5 } },
+            { id: 'c17', name: '班級經營實務', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'mon', startP: 5 } },
+            { id: 'c3', name: '國音與說話', credits: 2, type: 'compulsory', domain: 'basic_subj', scheduleInfo: { day: 'mon', startP: 7 } },
+            { id: 'c15_A', baseId: 'c15', baseName: '社會科學領域教材教法', name: '社會科教材教法(週一)', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'mon', startP: 9 } },
+            { id: 'c13', name: '國語文科學領域教材教法', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'mon', startP: 9 } },
+            { id: 'c6', name: '學習心理與教學', credits: 2, type: 'compulsory', domain: 'basic_edu', scheduleInfo: { day: 'mon', startP: 9 } },
+
+            // 週二
+            { id: 'e_life', name: '生命教育', credits: 2, type: 'elective', domain: 'basic_edu', scheduleInfo: { day: 'tue', startP: 7 } },
+            { id: 'c2', name: '自然科學概論', credits: 2, type: 'compulsory', domain: 'basic_subj', scheduleInfo: { day: 'tue', startP: 9 } },
+            { id: 'c14_B', baseId: 'c14', baseName: '數學科教材教法', name: '數學科教材教法(週二)', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'tue', startP: 9 } },
+            { id: 'c15_B', baseId: 'c15', baseName: '社會科學領域教材教法', name: '社會科教材教法(週二)', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'tue', startP: 9 } },
+
+            // 週三
+            { id: 'e_issue', name: '教育議題專題', credits: 2, type: 'elective', domain: 'basic_edu', filterType: 'mandatory-elec', scheduleInfo: { day: 'wed', startP: 5 } },
+            { id: 'c4', name: '社會科領域概論', credits: 2, type: 'compulsory', domain: 'basic_subj', scheduleInfo: { day: 'wed', startP: 7 } },
+            { id: 'c1', name: '普通數學', credits: 2, type: 'compulsory', domain: 'basic_subj', scheduleInfo: { day: 'wed', startP: 9 } },
+
+            // 週四
+            { id: 'e_sp', name: '特殊教育導論', credits: 3, type: 'elective', domain: 'basic_edu', filterType: 'mandatory-elec', scheduleInfo: { day: 'thu', startP: 2 } },
+            { id: 'c19', name: '雙語教學實習', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'thu', startP: 5 } },
+            { id: 'e_adapt', name: '適性教學與實務', credits: 2, type: 'elective', domain: 'practical', scheduleInfo: { day: 'thu', startP: 5 } },
+            { id: 'c12', name: '輔導原理與實務', credits: 2, type: 'compulsory', domain: 'methodology', scheduleInfo: { day: 'thu', startP: 5 } },
+            { id: 'e_sch', name: '學校經營與教育行政', credits: 2, type: 'elective', domain: 'basic_edu', scheduleInfo: { day: 'thu', startP: 9 } },
+            { id: 'c18', name: '自然科學領域教材教法', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'thu', startP: 9 } },
+
+            // 週五
+            { id: 'c9', name: '課程設計與發展', credits: 2, type: 'compulsory', domain: 'methodology', scheduleInfo: { day: 'fri', startP: 3 } },
+            { id: 'c10', name: '教學原理', credits: 2, type: 'compulsory', domain: 'methodology', scheduleInfo: { day: 'fri', startP: 5 } },
+            { id: 'c16', name: '國民小學教學實習', credits: 2, type: 'compulsory', domain: 'practical', scheduleInfo: { day: 'fri', startP: 5 } },
+            { id: 'e_tech', name: '教學科技與運用', credits: 2, type: 'elective', domain: 'methodology', scheduleInfo: { day: 'fri', startP: 7 } },
+            { id: 'c_mus', name: '音樂', credits: 2, type: 'compulsory_choice', domain: 'basic_subj', scheduleInfo: { day: 'fri', startP: 9 } },
+            
+            // --- 未開課之歷年課程 (僅供勾選) ---
+            { id: 'e1', name: '兒童英語', credits: 2, type: 'elective', domain: 'basic_subj', excludeFromPending: true },
+            { id: 'c_art', name: '視覺藝術', credits: 2, type: 'compulsory_choice', domain: 'basic_subj', excludeFromPending: true },
+            { id: 'e_bh', name: '行為改變技術', credits: 2, type: 'elective', domain: 'methodology', excludeFromPending: true },
+            { id: 'e_kb', name: '鍵盤樂', credits: 2, type: 'elective', domain: 'basic_subj', excludeFromPending: true },
+            { id: 'e_pic', name: '繪本與教學', credits: 2, type: 'elective', domain: 'methodology', excludeFromPending: true },
+            { id: 'e_self', name: '自律學習與實踐', credits: 1, type: 'elective', domain: 'practical', excludeFromPending: true },
+            { id: 'e_ai', name: '科技輔助自主學習', credits: 2, type: 'elective', domain: 'practical', excludeFromPending: true },
+            { id: 'e_env', name: '環境教育', credits: 2, type: 'elective', domain: 'basic_edu', excludeFromPending: true },
+            { id: 'e_multi', name: '多元文化教育', credits: 2, type: 'elective', domain: 'basic_edu', excludeFromPending: true },
+            { id: 'e_gen', name: '性別教育', credits: 2, type: 'elective', domain: 'basic_edu', excludeFromPending: true },
+            { id: 'e_prof', name: '教師專業發展', credits: 2, type: 'elective', domain: 'basic_edu', excludeFromPending: true },
+            { id: 'e_career', name: '教育生涯規劃', credits: 2, type: 'elective', domain: 'methodology', excludeFromPending: true },
+            { id: 'e_eng', name: '國民小學英語教材教法', credits: 2, type: 'elective', domain: 'practical', excludeFromPending: true },
+            { id: 'e_life_cur', name: '國民小學生活課程教材教法', credits: 2, type: 'elective', domain: 'practical', excludeFromPending: true },
+            { id: 'e_psy', name: '心理與教育測驗', credits: 2, type: 'elective', domain: 'methodology', excludeFromPending: true },
+            { id: 'e_child', name: '兒童發展', credits: 2, type: 'elective', domain: 'basic_edu', excludeFromPending: true },
+            { id: 'e_rem', name: '補救教學', credits: 2, type: 'elective', domain: 'methodology', excludeFromPending: true }
+        ];
+
+        let coursesData = [...defaultCoursesData];
+        let state = { completed: new Set(), schedule: {} }; 
+        let currentDraggedCourse = null; 
+        
+        const getCourseById = id => coursesData.find(c => c.id === id) || coursesData.find(c => (c.baseId || c.id) === id);
+
+        function saveLocalData() {
+            const dataToSave = {
+                completed: Array.from(state.completed),
+                schedule: state.schedule,
+                customCourses: coursesData.filter(c => c.customCategory || c.type === 'custom')
+            };
+            localStorage.setItem('puEduScheduleState_115_2_final_v2', JSON.stringify(dataToSave));
+        }
+
+        function loadLocalData() {
+            const savedData = localStorage.getItem('puEduScheduleState_115_2_final_v2');
+            if (savedData) {
+                try {
+                    const parsed = JSON.parse(savedData);
+                    state.completed = new Set(parsed.completed || []);
+                    
+                    let loadedSchedule = parsed.schedule || {};
+                    state.schedule = {};
+                    for (let cell in loadedSchedule) {
+                        if (Array.isArray(loadedSchedule[cell])) state.schedule[cell] = loadedSchedule[cell];
+                        else if (typeof loadedSchedule[cell] === 'string') state.schedule[cell] = [loadedSchedule[cell]];
+                    }
+
+                    if (parsed.customCourses && Array.isArray(parsed.customCourses)) {
+                        coursesData = [...defaultCoursesData, ...parsed.customCourses];
+                    }
+                } catch (e) {
+                    console.error("載入存檔失敗", e);
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadLocalData(); 
+            buildScheduleGrid();
+            initModals();
+            setupDragAndDrop();
+            renderUI();
+        });
+
+        function openModal(type) { document.getElementById(`modal-${type}`).style.display = 'flex'; }
+        function closeModal(type) { document.getElementById(`modal-${type}`).style.display = 'none'; }
+
+        function filterCourses(type) {
+            const courseCards = document.querySelectorAll('#pending .course-card');
+            courseCards.forEach(card => {
+                if (type === 'all') {
+                    card.classList.remove('hide-course');
+                } else {
+                    if (card.dataset.filter === type) card.classList.remove('hide-course');
+                    else card.classList.add('hide-course');
+                }
+            });
+
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('ring-2', 'ring-offset-1', 'ring-blue-500', 'bg-white');
+            });
+            const activeBtn = document.getElementById('btn-' + type);
+            activeBtn.classList.add('ring-2', 'ring-offset-1', 'ring-blue-500');
+            if(type === 'all') activeBtn.classList.add('bg-white');
+        }
+
+        window.resetSystem = function() {
+            if(confirm('確定要清空所有已修紀錄與本學期課表嗎？(自訂課程與存檔也將被清除)')) {
+                state.completed.clear();
+                state.schedule = {};
+                coursesData = [...defaultCoursesData];
+                localStorage.removeItem('puEduScheduleState_115_2_final_v2'); 
+                renderUI();
+                filterCourses('all'); 
+            }
+        };
+
+        window.exportSchedule = function() {
+            const targetElement = document.getElementById('export-area');
+            const originalBg = targetElement.style.backgroundColor;
+            targetElement.style.backgroundColor = '#ffffff'; 
+
+            const btn = document.querySelector('button[onclick="exportSchedule()"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "⏳ 生成中...";
+
+            html2canvas(targetElement, {
+                scale: 2, 
+                useCORS: true,
+                backgroundColor: '#ffffff'
+            }).then(canvas => {
+                targetElement.style.backgroundColor = originalBg; 
+                btn.innerHTML = originalText; 
+
+                const imgData = canvas.toDataURL("image/png");
+                const link = document.createElement('a');
+                link.href = imgData;
+                link.download = `靜宜115-2最終校正課表_${new Date().toISOString().slice(0,10)}.png`;
+                link.click();
+            }).catch(err => {
+                alert("匯出圖片失敗，請重試！");
+                btn.innerHTML = originalText;
+            });
+        };
+
+        window.addCustomCourse = function() {
+            const category = document.getElementById('custom-course-category').value;
+            const nameInput = document.getElementById('custom-course-name');
+            const creditsInput = document.getElementById('custom-course-credits');
+            
+            const dayInput = document.getElementById('custom-course-day').value;
+            const periodInput = parseInt(document.getElementById('custom-course-period').value);
+            
+            const name = nameInput.value.trim();
+            const credits = parseInt(creditsInput.value);
+
+            if (!name || isNaN(credits) || credits < 1) {
+                alert('請填寫完整且正確的課程名稱與連堂節數！');
+                return;
+            }
+
+            let type, domain, filterType;
+            if (category === 'master') { type = 'custom'; domain = 'custom_master'; filterType = 'master'; }
+            else if (category === 'compulsory') { type = 'compulsory'; domain = 'custom_comp'; filterType = 'compulsory'; }
+            else if (category === 'elective') { type = 'elective'; domain = 'custom_elec'; filterType = 'elective'; }
+
+            const newCustomCourse = {
+                id: 'custom_' + Date.now(),
+                name: name, credits: credits, type: type, domain: domain, customCategory: category, filterType: filterType,
+                scheduleInfo: { day: dayInput, startP: periodInput }
+            };
+            
+            coursesData.push(newCustomCourse);
+            nameInput.value = ''; creditsInput.value = '';
+            
+            attemptSchedule(newCustomCourse.id, dayInput, periodInput);
+            renderUI();
+            filterCourses('all'); 
+        };
+
+        function buildScheduleGrid() {
+            const tbody = document.getElementById('schedule-body');
+            const days = ['mon', 'tue', 'wed', 'thu', 'fri'];
+            const periods = [
+                { num: 1, time: '08:10-09:00' }, { num: 2, time: '09:10-10:00' }, { num: 3, time: '10:10-11:00' }, { num: 4, time: '11:10-12:00' },
+                { num: 5, time: '13:10-14:00' }, { num: 6, time: '14:10-15:00' }, { num: 7, time: '15:10-16:00' }, { num: 8, time: '16:10-17:00' },
+                { num: 9, time: '17:10-18:00' }, { num: 10, time: '18:05-18:55' }, { num: 11, time: '19:00-19:50' }, { num: 12, time: '19:55-20:45' },
+                { num: 13, time: '20:50-21:40' }
+            ];
+            
+            periods.forEach((p) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition-colors";
+                tr.innerHTML = `
+                    <td class="border border-slate-300 p-1 text-center bg-slate-50 text-slate-700">
+                        <div class="font-bold text-sm">第 ${p.num} 節</div>
+                        <div class="text-[0.65rem] text-slate-500">${p.time}</div>
+                    </td>`;
+                days.forEach(day => {
+                    const td = document.createElement('td');
+                    td.className = 'border border-slate-300 schedule-cell dropzone hover:bg-slate-50 transition-colors';
+                    td.id = `cell-${day}-${p.num}`;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        function initModals() {
+            const listComp = document.getElementById('modal-list-compulsory');
+            const listElec = document.getElementById('modal-list-elective');
+            listComp.innerHTML = ''; listElec.innerHTML = '';
+            
+            let addedBaseIds = new Set();
+            
+            coursesData.forEach(course => {
+                if (course.customCategory || course.type === 'custom') return; 
+                
+                const bId = course.baseId || course.id;
+                if (addedBaseIds.has(bId)) return;
+                addedBaseIds.add(bId);
+
+                const isChoice = course.type === 'compulsory_choice';
+                const isComp = course.type === 'compulsory' || isChoice;
+                const badgeColor = isComp ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700';
+                
+                const displayName = course.baseName || course.name;
+                const domainText = domainLabels[course.domain] || '';
+                
+                let tagsHtml = '';
+                if (isChoice) tagsHtml += '<span class="text-blue-600 font-bold text-[0.65rem] ml-1">(2選1)</span>';
+                if (course.id === 'e_sp' || course.id === 'e_issue') tagsHtml += '<span class="text-red-500 font-bold text-[0.65rem] ml-1">(必選)</span>';
+                
+                const label = document.createElement('label');
+                label.className = `flex items-center justify-between p-3 hover:bg-slate-50 rounded border cursor-pointer ${isComp ? 'hover:border-blue-300' : 'hover:border-orange-300'}`;
+                label.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <input type="checkbox" value="${bId}" class="course-checkbox w-6 h-6 text-blue-600 rounded cursor-pointer">
+                        <div class="font-medium text-gray-800 text-lg flex items-baseline">
+                            ${displayName} <span class="text-sm text-slate-500 ml-1 font-normal">(${domainText})</span> ${tagsHtml}
+                        </div>
+                    </div>
+                    <span class="text-sm border px-3 py-1 rounded font-bold ${badgeColor}">${course.credits} 學分</span>
+                `;
+
+                label.querySelector('input').addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        state.completed.add(bId);
+                        for (let cell in state.schedule) {
+                            state.schedule[cell] = state.schedule[cell].filter(id => {
+                                const sc = getCourseById(id);
+                                const scBaseId = sc ? (sc.baseId || sc.id) : id;
+                                return scBaseId !== bId;
+                            });
+                            if (state.schedule[cell].length === 0) delete state.schedule[cell];
+                        }
+                    } else {
+                        state.completed.delete(bId);
+                    }
+                    renderUI();
+                });
+                if (isComp) listComp.appendChild(label); else listElec.appendChild(label);
+            });
+        }
+
+        function formatCourseLabel(course, isSmall) {
+            const domainText = domainLabels[course.domain] || '';
+            const isChoice = course.type === 'compulsory_choice';
+            const isMandatoryElec = course.id === 'e_sp' || course.id === 'e_issue';
+            
+            let html = `${course.name} <span class="${isSmall ? 'hidden' : 'text-sm text-slate-500 ml-1'} font-normal">(${domainText})</span>`;
+            let tags = [];
+            if (isChoice) tags.push('<span class="text-blue-600 font-bold">(2選1)</span>');
+            if (isMandatoryElec) tags.push('<span class="text-red-500 font-bold">(必選)</span>');
+            if (course.customCategory === 'master') tags.push('<span class="text-purple-600 font-bold">(碩士)</span>');
+            if (course.customCategory === 'compulsory') tags.push('<span class="text-blue-600 font-bold">(自訂)</span>');
+            if (course.customCategory === 'elective') tags.push('<span class="text-orange-600 font-bold">(自訂)</span>');
+            
+            if (tags.length > 0) html += `<span class="text-[0.65rem] ml-1">${tags.join(' ')}</span>`;
+            return html;
+        }
+
+        function removeCourseFromSchedule(courseId) {
+            for (let cell in state.schedule) {
+                state.schedule[cell] = state.schedule[cell].filter(id => id !== courseId);
+                if (state.schedule[cell].length === 0) delete state.schedule[cell];
+            }
+        }
+
+        function attemptSchedule(courseId, targetDay, targetStartP) {
+            const course = getCourseById(courseId);
+            if (!course) return false;
+            
+            const credits = course.credits;
+            if (targetStartP + credits - 1 > 13) {
+                alert(`🚨 節次空間不足！此課程會超出今日課表範圍。`);
+                return false;
+            }
+
+            removeCourseFromSchedule(courseId);
+            for (let i = 0; i < credits; i++) {
+                const cellId = `cell-${targetDay}-${targetStartP + i}`;
+                if (!state.schedule[cellId]) state.schedule[cellId] = [];
+                state.schedule[cellId].push(courseId);
+            }
+            return true;
+        }
+
+        function createCard(course, isScheduled, partIndex = 1, totalParts = 1, isConflicted = false) {
+            const card = document.createElement('div');
+            card.dataset.id = course.id;
+            card.draggable = true; 
+            
+            let filterType = course.filterType || 'elective'; 
+            if (course.type === 'compulsory' || course.type === 'compulsory_choice') filterType = 'compulsory';
+            if (course.customCategory === 'master') filterType = 'master';
+            card.dataset.filter = filterType;
+
+            const isComp = course.type === 'compulsory' || course.type === 'compulsory_choice';
+            const isCustomMaster = course.customCategory === 'master' || course.type === 'custom';
+            
+            let cardClasses = "course-card flex relative w-full"; 
+            
+            if (isScheduled && isConflicted) {
+                cardClasses += " bg-red-100 text-red-900 border-red-500 z-20";
+            } else {
+                if (isCustomMaster) cardClasses += " bg-purple-50 text-purple-900 border-purple-300";
+                else if (isComp) cardClasses += " bg-blue-50 text-blue-900 border-blue-300";
+                else cardClasses += " bg-orange-50 text-orange-900 border-orange-300";
+            }
+            
+            if (isScheduled) {
+                cardClasses += " border-2"; 
+                if (totalParts > 1) {
+                    if (partIndex === 1) cardClasses += " rounded-t-lg rounded-b-none border-b-0";
+                    else if (partIndex === totalParts) cardClasses += " rounded-b-lg rounded-t-none border-t-0 shadow-sm";
+                    else cardClasses += " rounded-none border-y-0"; 
+                } else {
+                    cardClasses += " rounded-lg shadow-sm"; 
+                }
+                card.className = cardClasses; 
+                
+                if (partIndex === 1) {
+                    card.innerHTML = `<div class="font-bold tracking-wide text-[0.8rem] leading-tight px-1 mt-1">${formatCourseLabel(course, true)}</div>`;
+                } else if (partIndex === Math.ceil(totalParts / 2) && totalParts >= 3) {
+                    card.innerHTML = `<div class="text-[0.65rem] opacity-50">⬇️ 連堂佔用中</div>`;
+                }
+
+                card.addEventListener('click', (e) => {
+                    removeCourseFromSchedule(course.id);
+                    renderUI();
+                });
+
+            } else {
+                cardClasses += " border rounded-lg p-3 justify-between items-center mb-3 bg-white shadow-sm hover:shadow-md";
+                card.className = cardClasses;
+                card.innerHTML = `
+                    <div class="font-bold tracking-wide text-[0.85rem] leading-tight">
+                        ${formatCourseLabel(course, false)}
+                        <div class="text-[0.65rem] text-gray-400 mt-1 font-normal">
+                            ${course.scheduleInfo ? `📌 預設: 星期${course.scheduleInfo.day==='mon'?'一':course.scheduleInfo.day==='tue'?'二':course.scheduleInfo.day==='wed'?'三':course.scheduleInfo.day==='thu'?'四':'五'} 第${course.scheduleInfo.startP}節` : '手動拖曳'}
+                        </div>
+                    </div>
+                    <span class="text-[0.7rem] bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-bold whitespace-nowrap self-start border border-slate-200">
+                        ${course.credits} 節
+                    </span>
+                `;
+
+                card.addEventListener('click', (e) => {
+                    if (course.scheduleInfo) {
+                        attemptSchedule(course.id, course.scheduleInfo.day, course.scheduleInfo.startP);
+                        renderUI();
+                    } else {
+                        alert("⚠️ 此課程未設定預設時間，請手動拖曳至左側課表。");
+                    }
+                });
+            }
+
+            card.addEventListener('dragstart', handleDragStart);
+            card.addEventListener('dragend', handleDragEnd);
+            return card;
+        }
+
+        function checkGraduationRules(courseIds) {
+            let processedBaseIds = new Set();
+            let comp = 0, elec = 0, choice = 0;
+            let hasMandatorySp = false, hasMandatoryIssue = false;
+            let domains = { 
+                basic_subj: { credits: 0, count: 0, hasArtOrMusic: false },
+                basic_edu: { credits: 0, count: 0 }, methodology: { credits: 0, count: 0 }, practical: { credits: 0, count: 0 }
+            };
+
+            courseIds.forEach(id => {
+                const c = getCourseById(id);
+                if (!c || c.customCategory === 'master' || c.type === 'custom') return; 
+                
+                const bId = c.baseId || c.id;
+                if (processedBaseIds.has(bId)) return;
+                processedBaseIds.add(bId);
+
+                if (c.type === 'compulsory') comp += c.credits;
+                if (c.type === 'compulsory_choice') choice += c.credits;
+                if (c.type === 'elective') elec += c.credits;
+
+                if (bId === 'e_sp') hasMandatorySp = true;
+                if (bId === 'e_issue') hasMandatoryIssue = true;
+
+                if (c.domain === 'basic_subj') {
+                    domains.basic_subj.credits += c.credits; domains.basic_subj.count += 1;
+                    if (bId === 'c_art' || bId === 'c_mus') domains.basic_subj.hasArtOrMusic = true;
+                }
+                if (c.domain === 'basic_edu') { domains.basic_edu.credits += c.credits; domains.basic_edu.count += 1; }
+                if (c.domain === 'methodology') { domains.methodology.credits += c.credits; domains.methodology.count += 1; }
+                if (c.domain === 'practical') { domains.practical.credits += c.credits; domains.practical.count += 1; }
+            });
+
+            if (choice > 2) { comp += 2; elec += (choice - 2); } else { comp += choice; }
+
+            const r1 = domains.basic_subj.credits >= 10 && domains.basic_subj.hasArtOrMusic;
+            const r2 = domains.basic_edu.credits >= 4 && domains.basic_edu.count >= 2;
+            const r3 = domains.methodology.credits >= 8 && domains.methodology.count >= 4;
+            const r4 = domains.practical.credits >= 12 && domains.practical.count >= 6;
+            const r5 = elec >= 12 && hasMandatorySp && hasMandatoryIssue && (comp + elec >= 46);
+
+            return { comp, elec, hasMandatorySp, hasMandatoryIssue, domains, rules: [r1, r2, r3, r4, r5], processedBaseIds };
+        }
+
+        function renderUI() {
+            saveLocalData();
+            
+            let courseParts = {};
+            let conflictedIds = new Set();
+            
+            for (let cellId in state.schedule) {
+                const cids = state.schedule[cellId];
+                if (cids.length > 1) {
+                    cids.forEach(id => conflictedIds.add(id)); 
+                }
+                cids.forEach(cid => {
+                    if(!courseParts[cid]) courseParts[cid] = [];
+                    courseParts[cid].push(cellId);
+                });
+            }
+            
+            Object.values(courseParts).forEach(cells => {
+                cells.sort((a,b) => parseInt(a.split('-')[2]) - parseInt(b.split('-')[2]));
+            });
+
+            let uniqueScheduledBaseIds = new Set();
+            let currentSemEduCredits = 0;
+            
+            Object.keys(courseParts).forEach(cid => {
+                const c = getCourseById(cid);
+                if (c) {
+                    const bId = c.baseId || c.id;
+                    if (!uniqueScheduledBaseIds.has(bId) && c.customCategory !== 'master' && c.domain !== 'custom_master') {
+                        currentSemEduCredits += c.credits;
+                        uniqueScheduledBaseIds.add(bId);
+                    }
+                }
+            });
+
+            let allPlannedIds = Array.from(state.completed).concat(Object.keys(courseParts));
+            const status = checkGraduationRules(allPlannedIds);
+            const completedStatus = checkGraduationRules(Array.from(state.completed));
+            
+            document.getElementById('dash-acq-comp').innerText = completedStatus.comp;
+            document.getElementById('dash-acq-elec').innerText = completedStatus.elec;
+
+            const missingCompCredits = Math.max(0, REQ_COMP_CREDITS - status.comp);
+            const missingElecCredits = Math.max(0, REQ_ELEC_CREDITS - status.elec);
+            document.getElementById('missing-comp-credits').innerText = missingCompCredits;
+            document.getElementById('missing-elec-credits').innerText = missingElecCredits;
+
+            const allCompulsoryBaseIds = Array.from(new Set(defaultCoursesData.filter(c => c.type === 'compulsory').map(c => c.baseId || c.id)));
+            let missingNames = [];
+            
+            allCompulsoryBaseIds.forEach(bId => {
+                if (!status.processedBaseIds.has(bId)) {
+                    const course = getCourseById(bId);
+                    if (course) missingNames.push(course.baseName || course.name);
+                }
+            });
+
+            if (!status.processedBaseIds.has('c_art') && !status.processedBaseIds.has('c_mus')) {
+                missingNames.push('視覺藝術 或 音樂 (2選1)');
+            }
+
+            const missingListEl = document.getElementById('missing-comp-list');
+            if (missingNames.length > 0) {
+                missingListEl.innerHTML = missingNames.map(n => `<span class="inline-block bg-red-100 text-red-800 px-2 py-1 rounded shadow-sm m-0.5">${n}</span>`).join('');
+            } else {
+                missingListEl.innerHTML = '<span class="text-green-600 font-bold px-1 py-1">🎉 恭喜！必修課程已全數修畢或排入！</span>';
+            }
+
+            let r1m = []; if(status.domains.basic_subj.credits < 10) r1m.push(`缺${10 - status.domains.basic_subj.credits}學分`); if(!status.domains.basic_subj.hasArtOrMusic) r1m.push(`缺藝術/音樂`);
+            let r2m = []; if(status.domains.basic_edu.credits < 4) r2m.push(`缺${4 - status.domains.basic_edu.credits}學分`); if(status.domains.basic_edu.count < 2) r2m.push(`缺${2 - status.domains.basic_edu.count}科`);
+            let r3m = []; if(status.domains.methodology.credits < 8) r3m.push(`缺${8 - status.domains.methodology.credits}學分`); if(status.domains.methodology.count < 4) r3m.push(`缺${4 - status.domains.methodology.count}科`);
+            let r4m = []; if(status.domains.practical.credits < 12) r4m.push(`缺${12 - status.domains.practical.credits}學分`); if(status.domains.practical.count < 6) r4m.push(`缺${6 - status.domains.practical.count}科`);
+            let r5m = []; if(status.elec < 12) r5m.push(`選修缺${12 - status.elec}學分`); if((status.comp + status.elec) < 46) r5m.push(`總分缺${46 - (status.comp + status.elec)}學分`); if(!status.hasMandatorySp) r5m.push(`缺特教`); if(!status.hasMandatoryIssue) r5m.push(`缺議題`);
+
+            const missingTexts = [
+                r1m.length ? `(差: ${r1m.join(', ')})` : `(已達標)`, r2m.length ? `(差: ${r2m.join(', ')})` : `(已達標)`,
+                r3m.length ? `(差: ${r3m.join(', ')})` : `(已達標)`, r4m.length ? `(差: ${r4m.join(', ')})` : `(已達標)`,
+                r5m.length ? `(差: ${r5m.join(', ')})` : `(已達標)`
+            ];
+            const ruleBaseTexts = [
+                "1. 基本學科：至少 10 學分 (含藝術/音樂)", "2. 教育基礎：至少修習 2 科，共 4 學分",
+                "3. 教育方法：至少修習 4 科，共 8 學分", "4. 教育實踐：至少修習 6 科，共 12 學分",
+                "5. 總選修達 12 學分 (需含特教、議題) 且總分達 46"
+            ];
+
+            for(let i=0; i<5; i++) {
+                const el = document.getElementById(`check-rule-${i+1}`);
+                if (status.rules[i]) {
+                    el.className = 'check-pass bg-green-50 p-2 rounded border border-green-200';
+                    el.innerText = `✅ ${ruleBaseTexts[i]} ➡️ ${missingTexts[i]}`;
+                } else {
+                    el.className = 'check-fail bg-red-50 p-2 rounded border border-red-200';
+                    el.innerText = `❌ ${ruleBaseTexts[i]} ➡️ ${missingTexts[i]}`;
+                }
+            }
+
+            document.querySelectorAll('.course-checkbox').forEach(cb => cb.checked = state.completed.has(cb.value));
+            document.getElementById('pending').innerHTML = '';
+            document.querySelectorAll('.schedule-cell').forEach(cell => cell.innerHTML = '');
+
+            for (let cellId in state.schedule) {
+                const cids = state.schedule[cellId];
+                cids.forEach(cid => {
+                    const c = getCourseById(cid);
+                    if (c && document.getElementById(cellId)) {
+                        const partsArr = courseParts[cid];
+                        const pIndex = partsArr.indexOf(cellId) + 1; 
+                        const isConflicted = conflictedIds.has(cid); 
+                        document.getElementById(cellId).appendChild(createCard(c, true, pIndex, partsArr.length, isConflicted));
+                    }
+                });
+            }
+
+            coursesData.forEach(course => {
+                const bId = course.baseId || course.id;
+                if (state.completed.has(bId)) return;
+                if (course.excludeFromPending && !course.customCategory) return;
+                
+                let isBaseScheduled = false;
+                Object.keys(courseParts).forEach(cid => {
+                    const sc = getCourseById(cid);
+                    if (sc && (sc.baseId || sc.id) === bId) isBaseScheduled = true;
+                });
+
+                if (!isBaseScheduled) {
+                    document.getElementById('pending').appendChild(createCard(course, false));
+                }
+            });
+
+            const activeFilterBtn = document.querySelector('.filter-btn.ring-2');
+            if (activeFilterBtn) {
+                const filterType = activeFilterBtn.id.replace('btn-', '');
+                filterCourses(filterType);
+            }
+
+            const semCreditEl = document.getElementById('current-sem-credits');
+            semCreditEl.innerText = currentSemEduCredits;
+            if (currentSemEduCredits > MAX_EDU_CREDITS_PER_SEM) {
+                semCreditEl.classList.add('text-red-600');
+            } else {
+                semCreditEl.classList.remove('text-red-600');
+            }
+        }
+
+        // --- 拖放互動邏輯 ---
+        function handleDragStart(e) {
+            const id = e.target.dataset.id;
+            if(!id) return;
+            currentDraggedCourse = getCourseById(id);
+            if(!currentDraggedCourse) return;
+            e.dataTransfer.setData('text/plain', currentDraggedCourse.id);
+            setTimeout(() => e.target.classList.add('opacity-50'), 0);
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('opacity-50');
+            currentDraggedCourse = null;
+            clearDragHighlights();
+        }
+
+        function clearDragHighlights() {
+            document.querySelectorAll('.drag-over, .drag-error').forEach(el => {
+                el.classList.remove('drag-over', 'drag-error');
+            });
+        }
+
+        function setupDragAndDrop() {
+            document.querySelectorAll('.dropzone').forEach(zone => {
+                zone.addEventListener('dragover', (e) => { 
+                    e.preventDefault(); 
+                    if (!currentDraggedCourse) return;
+                    clearDragHighlights();
+
+                    if (zone.id.startsWith('cell-')) {
+                        const parts = zone.id.split('-');
+                        const day = parts[1];
+                        const startP = parseInt(parts[2]);
+                        const credits = currentDraggedCourse.credits;
+                        const isOutOfBounds = (startP + credits - 1 > 13);
+                        
+                        for(let i = 0; i < credits; i++) {
+                            const checkId = `cell-${day}-${startP + i}`;
+                            const el = document.getElementById(checkId);
+                            if (el) {
+                                if (isOutOfBounds) el.classList.add('drag-error');
+                                else el.classList.add('drag-over'); 
+                            }
+                        }
+                    } else if (zone.id === 'pending') {
+                        zone.classList.add('drag-over');
+                    }
+                });
+
+                zone.addEventListener('dragleave', (e) => {
+                    if (!zone.contains(e.relatedTarget)) clearDragHighlights();
+                });
+
+                zone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    clearDragHighlights();
+
+                    const courseId = e.dataTransfer.getData('text/plain');
+                    if (!courseId) return;
+                    const course = getCourseById(courseId);
+                    if (!course) return;
+
+                    const targetZoneId = zone.id;
+
+                    if (targetZoneId.startsWith('cell-')) {
+                        const parts = targetZoneId.split('-');
+                        const day = parts[1];
+                        const startP = parseInt(parts[2]);
+                        const credits = course.credits;
+
+                        if (startP + credits - 1 > 13) {
+                            alert(`🚨 節次空間不足！此課程會超出今日課表範圍。`);
+                            return;
+                        }
+
+                        removeCourseFromSchedule(courseId);
+                        for (let i = 0; i < credits; i++) {
+                            const cellId = `cell-${day}-${startP + i}`;
+                            if (!state.schedule[cellId]) state.schedule[cellId] = [];
+                            state.schedule[cellId].push(courseId);
+                        }
+
+                    } else if (targetZoneId === 'pending') {
+                        removeCourseFromSchedule(courseId);
+                    }
+                    renderUI();
+                });
+            });
+        }
+    </script>
+</body>
+</html>
